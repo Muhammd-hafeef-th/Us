@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Button, Typography, Paper, IconButton, CircularProgress, Snackbar, Alert } from '@mui/material';
+import { Box, Button, Typography, Paper, IconButton, CircularProgress, Snackbar, Alert, TextField } from '@mui/material';
 import { useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { useSocket } from '../context/SocketContext';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import VideocamOffIcon from '@mui/icons-material/VideocamOff';
+import ChatIcon from '@mui/icons-material/Chat';
+import CloseIcon from '@mui/icons-material/Close';
+import SendIcon from '@mui/icons-material/Send';
 
 const VideoContainer = styled(Box)`
   display: grid;
@@ -116,6 +119,83 @@ const StatusMessage = styled(Box)`
   }
 `;
 
+const ChatPopup = styled(Paper)`
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 400px;
+  max-width: calc(100vw - 40px);
+  height: 500px;
+  max-height: calc(100vh - 100px);
+  display: flex;
+  flex-direction: column;
+  background-color: #fff;
+  border: 3px solid #000;
+  box-shadow: 8px 8px 0px #000;
+  z-index: 1000;
+  font-family: 'Press Start 2P', cursive;
+
+  @media (max-width: 767px) {
+    width: calc(100vw - 40px);
+    height: 400px;
+  }
+`;
+
+const ChatHeader = styled(Box)`
+  padding: 12px 16px;
+  background-color: #000;
+  color: #fff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 3px solid #000;
+`;
+
+const MessagesContainer = styled(Box)`
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background-color: #f5f5f5;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #e0e0e0;
+    border: 2px solid #000;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #000;
+    border: 1px solid #000;
+  }
+`;
+
+const MessageBubble = styled(Box)`
+  padding: 8px 12px;
+  background-color: ${props => props.isOwn ? '#000' : '#fff'};
+  color: ${props => props.isOwn ? '#fff' : '#000'};
+  border: 2px solid #000;
+  box-shadow: 3px 3px 0px #000;
+  align-self: ${props => props.isOwn ? 'flex-end' : 'flex-start'};
+  max-width: 70%;
+  word-wrap: break-word;
+  font-size: 0.7rem;
+  line-height: 1.4;
+`;
+
+const ChatInputContainer = styled(Box)`
+  padding: 12px;
+  background-color: #fff;
+  border-top: 3px solid #000;
+  display: flex;
+  gap: 8px;
+`;
+
 const VideoChat = () => {
   const location = useLocation();
   const { socket, onlineUsers } = useSocket();
@@ -131,6 +211,14 @@ const VideoChat = () => {
   const peerConnection = useRef();
   const interests = location.state?.interests || '';
   const roomId = useRef(null);
+
+  // Chat state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [currentMessage, setCurrentMessage] = useState('');
+  const messagesEndRef = useRef(null);
+  const chatPopupRef = useRef(null);
+  const chatInputRef = useRef(null);
 
   // Initialize media stream once on mount
   useEffect(() => {
@@ -225,6 +313,7 @@ const VideoChat = () => {
     socket.on('signal', handleSignal);
     socket.on('match-found', handleMatchFound);
     socket.on('user-left', handleUserLeft);
+    socket.on('chat-message', handleChatMessage);
     socket.on('connect_error', (error) => {
       console.error('Connection error:', error);
       setError('Failed to connect to server. Please try again later.');
@@ -234,6 +323,7 @@ const VideoChat = () => {
       socket.off('signal');
       socket.off('match-found');
       socket.off('user-left');
+      socket.off('chat-message');
       socket.off('connect_error');
     };
   }, [socket]); // Only depend on socket
@@ -306,6 +396,10 @@ const VideoChat = () => {
     }
     setIsConnected(false);
     setRemoteStream(null);
+
+    // Clear chat messages
+    setMessages([]);
+    setIsChatOpen(false);
 
     // Show different messages based on reason
     const { reason } = data || {};
@@ -416,6 +510,10 @@ const VideoChat = () => {
     setRemoteStream(null);
     setError(null);
 
+    // Clear chat messages and close chat box
+    setMessages([]);
+    setIsChatOpen(false);
+
     // Automatically start searching for next match
     startChat();
   };
@@ -433,6 +531,88 @@ const VideoChat = () => {
   const handleCloseError = () => {
     setError(null);
   };
+
+  // Chat functions
+  const handleChatMessage = (data) => {
+    const { message, senderId } = data;
+    setMessages(prev => [...prev, {
+      text: message,
+      isOwn: senderId === socket?.id,
+      timestamp: new Date().toISOString()
+    }]);
+
+    // Auto-open chat when receiving a message
+    if (!isChatOpen) {
+      setIsChatOpen(true);
+    }
+  };
+
+  const sendMessage = () => {
+    if (!currentMessage.trim() || !roomId.current) return;
+
+    socket.emit('chat-message', {
+      roomId: roomId.current,
+      message: currentMessage
+    });
+
+    // Add own message to display
+    setMessages(prev => [...prev, {
+      text: currentMessage,
+      isOwn: true,
+      timestamp: new Date().toISOString()
+    }]);
+
+    setCurrentMessage('');
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Click outside to close chat
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (chatPopupRef.current && !chatPopupRef.current.contains(event.target)) {
+        // Check if click is not on the chat button either
+        const chatButton = event.target.closest('button');
+        const isChatButton = chatButton?.querySelector('svg')?.getAttribute('data-testid') === 'ChatIcon';
+
+        if (!isChatButton && isChatOpen) {
+          setIsChatOpen(false);
+        }
+      }
+    };
+
+    if (isChatOpen) {
+      // Add event listener with a small delay to prevent immediate closing
+      setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutside);
+      }, 100);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isChatOpen]);
+
+  // Auto-focus input when chat opens
+  useEffect(() => {
+    if (isChatOpen && chatInputRef.current) {
+      chatInputRef.current.focus();
+    }
+  }, [isChatOpen]);
 
   return (
     <Box sx={{
@@ -585,17 +765,35 @@ const VideoChat = () => {
             {!isMediaReady ? 'Loading Camera...' : isWaiting ? 'Searching...' : 'Start Chat'}
           </Button>
         ) : (
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={skipChat}
-            sx={{
-              width: { xs: '100%', sm: 'auto' },
-              minWidth: { xs: '200px', sm: '120px' }
-            }}
-          >
-            Skip
-          </Button>
+          <>
+            <IconButton
+              onClick={() => setIsChatOpen(!isChatOpen)}
+              sx={{
+                backgroundColor: '#000',
+                color: '#fff',
+                border: '3px solid #000',
+                boxShadow: '4px 4px 0px #000',
+                '&:hover': {
+                  backgroundColor: '#333',
+                  transform: 'translate(2px, 2px)',
+                  boxShadow: '2px 2px 0px #000',
+                }
+              }}
+            >
+              <ChatIcon />
+            </IconButton>
+            <Button
+              variant="contained"
+              color="secondary"
+              onClick={skipChat}
+              sx={{
+                width: { xs: '100%', sm: 'auto' },
+                minWidth: { xs: '200px', sm: '120px' }
+              }}
+            >
+              Skip
+            </Button>
+          </>
         )}
       </Controls>
 
@@ -609,6 +807,114 @@ const VideoChat = () => {
           {error}
         </Alert>
       </Snackbar>
+
+      {/* Chat Popup */}
+      {isChatOpen && isConnected && (
+        <ChatPopup ref={chatPopupRef}>
+          <ChatHeader>
+            <Typography
+              variant="body2"
+              sx={{
+                fontSize: '0.75rem',
+                fontFamily: 'Press Start 2P, cursive'
+              }}
+            >
+              Chat
+            </Typography>
+            <IconButton
+              onClick={() => setIsChatOpen(false)}
+              sx={{
+                color: '#fff',
+                padding: '4px',
+                '&:hover': {
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)'
+                }
+              }}
+              size="small"
+            >
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </ChatHeader>
+
+          <MessagesContainer>
+            {messages.length === 0 ? (
+              <Typography
+                sx={{
+                  textAlign: 'center',
+                  color: '#666',
+                  fontSize: '0.7rem',
+                  fontFamily: 'Press Start 2P, cursive',
+                  marginTop: '20px'
+                }}
+              >
+                No messages yet
+              </Typography>
+            ) : (
+              messages.map((msg, index) => (
+                <MessageBubble key={index} isOwn={msg.isOwn}>
+                  {msg.text}
+                </MessageBubble>
+              ))
+            )}
+            <div ref={messagesEndRef} />
+          </MessagesContainer>
+
+          <ChatInputContainer>
+            <TextField
+              fullWidth
+              size="small"
+              value={currentMessage}
+              onChange={(e) => setCurrentMessage(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Type a message..."
+              inputRef={chatInputRef}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  fontFamily: 'Press Start 2P, cursive',
+                  fontSize: '0.7rem',
+                  backgroundColor: '#fff',
+                  '& fieldset': {
+                    border: '2px solid #000',
+                  },
+                  '&:hover fieldset': {
+                    border: '2px solid #000',
+                  },
+                  '&.Mui-focused fieldset': {
+                    border: '2px solid #000',
+                  },
+                },
+                '& .MuiInputBase-input::placeholder': {
+                  fontFamily: 'Press Start 2P, cursive',
+                  fontSize: '0.6rem',
+                  opacity: 0.6,
+                }
+              }}
+            />
+            <IconButton
+              onClick={sendMessage}
+              disabled={!currentMessage.trim()}
+              sx={{
+                backgroundColor: '#000',
+                color: '#fff',
+                border: '2px solid #000',
+                boxShadow: '3px 3px 0px #000',
+                '&:hover': {
+                  backgroundColor: '#333',
+                  transform: 'translate(2px, 2px)',
+                  boxShadow: '1px 1px 0px #000',
+                },
+                '&.Mui-disabled': {
+                  backgroundColor: '#ccc',
+                  color: '#666',
+                  border: '2px solid #999',
+                }
+              }}
+            >
+              <SendIcon />
+            </IconButton>
+          </ChatInputContainer>
+        </ChatPopup>
+      )}
     </Box>
   );
 };

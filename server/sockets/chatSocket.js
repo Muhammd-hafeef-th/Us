@@ -116,6 +116,19 @@ const chatSocket = (io) => {
       }
     });
 
+    // Handle chat messages in video chat rooms
+    socket.on('chat-message', (data) => {
+      const { roomId, message } = data;
+      if (!roomId || !message) return;
+
+      // Broadcast message to the other user in the room
+      socket.to(roomId).emit('chat-message', {
+        message,
+        senderId: socket.id,
+        timestamp: new Date().toISOString()
+      });
+    });
+
     socket.on('report-user', async (data) => {
       try {
         const report = new Report({
