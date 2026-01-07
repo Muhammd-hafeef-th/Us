@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Button, Typography, Paper, IconButton, CircularProgress, Snackbar, Alert, TextField } from '@mui/material';
+import { Box, Button, Typography, IconButton, CircularProgress, Snackbar, Alert, TextField } from '@mui/material';
 import { useLocation } from 'react-router-dom';
-import styled from 'styled-components';
 import { useSocket } from '../context/SocketContext';
 import VideocamIcon from '@mui/icons-material/Videocam';
 import VideocamOffIcon from '@mui/icons-material/VideocamOff';
@@ -9,218 +8,112 @@ import ChatIcon from '@mui/icons-material/Chat';
 import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 
-const VideoContainer = styled(Box)`
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  margin-top: 1rem;
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
-  padding: 0 1rem;
+// Custom hooks
+import { useWebRTC } from '../hooks/useWebRTC';
+import { useChat } from '../hooks/useChat';
 
-  @media (min-width: 768px) {
-    grid-template-columns: 1fr 1fr;
-  }
-`;
+// Utilities and constants
+import {
+  SOCKET_EVENTS,
+  TIMING,
+  ERROR_MESSAGES,
+  DISCONNECT_REASONS
+} from '../utils/constants';
+import { isStreamValid, toggleTrack, stopMediaStream } from '../utils/webrtcUtils';
 
-const VideoBox = styled(Paper)`
-  position: relative;
-  aspect-ratio: 16/9;
-  background-color: #000;
-  border: 4px solid #000;
-  overflow: hidden;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  width: 100%;
-  max-width: 100%;
-  margin: 0 auto;
+// Styled components
+import {
+  VideoContainer,
+  LocalVideoBox,
+  RemoteVideoBox,
+  Controls,
+  CameraButton,
+  StatusMessage,
+  ChatPopup,
+  ChatHeader,
+  MessagesContainer,
+  MessageBubble,
+  ChatInputContainer
+} from './VideoChat.styles';
 
-  @media (max-width: 767px) {
-    max-width: 100%;
-    margin-bottom: 1rem;
-  }
-`;
-
-const LocalVideoBox = styled(VideoBox)`
-  &::after {
-    content: 'You';
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    background-color: rgba(0, 0, 0, 0.7);
-    color: white;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    z-index: 2;
-  }
-`;
-
-const RemoteVideoBox = styled(VideoBox)`
-  &::after {
-    content: 'Stranger';
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    background-color: rgba(0, 0, 0, 0.7);
-    color: white;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    z-index: 2;
-  }
-`;
-
-const Controls = styled(Box)`
-  display: flex;
-  justify-content: ${props => props.isConnected ? 'flex-end' : 'center'};
-  gap: 1rem;
-  margin-top: 1rem;
-  padding: 0 1rem;
-  flex-wrap: wrap;
-
-  @media (max-width: 767px) {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-  }
-`;
-
-const CameraButton = styled(IconButton)`
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  background-color: rgba(0, 0, 0, 0.5);
-  color: white;
-  z-index: 2;
-  &:hover {
-    background-color: rgba(0, 0, 0, 0.7);
-  }
-
-  @media (max-width: 767px) {
-    padding: 8px;
-  }
-`;
-
-const StatusMessage = styled(Box)`
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-  color: white;
-  width: 90%;
-  max-width: 400px;
-  z-index: 2;
-  padding: 1rem;
-
-  @media (max-width: 767px) {
-    width: 95%;
-  }
-`;
-
-const ChatPopup = styled(Paper)`
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 400px;
-  max-width: calc(100vw - 40px);
-  height: 500px;
-  max-height: calc(100vh - 100px);
-  display: flex;
-  flex-direction: column;
-  background-color: #fff;
-  border: 3px solid #000;
-  box-shadow: 8px 8px 0px #000;
-  z-index: 1000;
-  font-family: 'Press Start 2P', cursive;
-
-  @media (max-width: 767px) {
-    width: calc(100vw - 40px);
-    height: 400px;
-  }
-`;
-
-const ChatHeader = styled(Box)`
-  padding: 12px 16px;
-  background-color: #000;
-  color: #fff;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 3px solid #000;
-`;
-
-const MessagesContainer = styled(Box)`
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background-color: #f5f5f5;
-
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: #e0e0e0;
-    border: 2px solid #000;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: #000;
-    border: 1px solid #000;
-  }
-`;
-
-const MessageBubble = styled(Box)`
-  padding: 8px 12px;
-  background-color: ${props => props.isOwn ? '#000' : '#fff'};
-  color: ${props => props.isOwn ? '#fff' : '#000'};
-  border: 2px solid #000;
-  box-shadow: 3px 3px 0px #000;
-  align-self: ${props => props.isOwn ? 'flex-end' : 'flex-start'};
-  max-width: 70%;
-  word-wrap: break-word;
-  font-size: 0.7rem;
-  line-height: 1.4;
-`;
-
-const ChatInputContainer = styled(Box)`
-  padding: 12px;
-  background-color: #fff;
-  border-top: 3px solid #000;
-  display: flex;
-  gap: 8px;
-`;
-
+/**
+ * VideoChat Component
+ * Main component for video chat functionality with WebRTC peer-to-peer connection
+ * Features: Video/audio streaming, text chat, user matching, skip functionality
+ */
 const VideoChat = () => {
+  // Router and context
   const location = useLocation();
   const { socket, onlineUsers } = useSocket();
+
+  // Refs
   const localStreamRef = useRef(null);
-  const [remoteStream, setRemoteStream] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const roomIdRef = useRef(null);
+
+  // State
   const [isWaiting, setIsWaiting] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isMediaReady, setIsMediaReady] = useState(false);
   const [error, setError] = useState(null);
-  const localVideoRef = useRef();
-  const remoteVideoRef = useRef();
-  const peerConnection = useRef();
+
+  // Extract interests from location state
   const interests = location.state?.interests || '';
-  const roomId = useRef(null);
 
-  // Chat state
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [currentMessage, setCurrentMessage] = useState('');
-  const messagesEndRef = useRef(null);
-  const chatPopupRef = useRef(null);
-  const chatInputRef = useRef(null);
+  /**
+   * WebRTC hook for peer connection management
+   */
+  const {
+    remoteStream,
+    isConnected,
+    handleSignal,
+    createOffer,
+    createPeerConnection,
+    closePeer,
+    setIsConnected
+  } = useWebRTC({
+    socket,
+    localStreamRef,
+    remoteVideoRef,
+    roomIdRef,
+    onConnectionEstablished: () => {
+      setIsWaiting(false);
+    },
+    onConnectionClosed: (data) => {
+      handleUserLeft(data);
+    },
+    onError: (errorMessage) => {
+      setError(errorMessage);
+    }
+  });
 
-  // Initialize media stream once on mount
+  /**
+   * Chat hook for message management
+   */
+  const {
+    isChatOpen,
+    messages,
+    currentMessage,
+    messagesEndRef,
+    chatPopupRef,
+    chatInputRef,
+    setCurrentMessage,
+    sendMessage,
+    handleKeyPress,
+    handleChatMessage,
+    clearMessages,
+    toggleChat,
+    closeChat
+  } = useChat({
+    socket,
+    roomIdRef,
+    isConnected
+  });
+
+  /**
+   * Initialize media stream on component mount
+   */
   useEffect(() => {
     const initializeMedia = async () => {
       try {
@@ -228,391 +121,184 @@ const VideoChat = () => {
           video: true,
           audio: true
         });
+
         localStreamRef.current = stream;
+
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
 
-        // Ensure stream has tracks before marking as ready
-        if (stream.getTracks().length > 0) {
+        // Validate stream has tracks
+        if (isStreamValid(stream)) {
           console.log('Media initialized with', stream.getTracks().length, 'tracks');
           setIsMediaReady(true);
         } else {
           console.error('Stream has no tracks');
-          setError('Failed to initialize media properly');
+          setError(ERROR_MESSAGES.MEDIA_ACCESS_DENIED);
           setIsMediaReady(false);
         }
       } catch (err) {
         console.error('Error accessing media devices:', err);
-        setError('Failed to access camera and microphone. Please check your permissions.');
+        setError(ERROR_MESSAGES.MEDIA_ACCESS_DENIED);
         setIsMediaReady(false);
       }
     };
 
     initializeMedia();
 
-    // Cleanup on unmount - disconnect from room if user leaves page
+    // Cleanup on unmount
     return () => {
-      // Close peer connection if exists
-      if (peerConnection.current) {
-        peerConnection.current.close();
-        peerConnection.current = null;
-      }
+      // Close peer connection
+      closePeer();
 
-      // Notify server we're leaving with skip reason (same behavior as skip)
-      if (roomId.current && socket) {
-        socket.emit('leave-room', { roomId: roomId.current, reason: 'skip' });
+      // Notify server we're leaving
+      if (roomIdRef.current && socket) {
+        socket.emit(SOCKET_EVENTS.LEAVE_ROOM, {
+          roomId: roomIdRef.current,
+          reason: DISCONNECT_REASONS.SKIP
+        });
       }
 
       // Stop all media tracks
       if (localVideoRef.current?.srcObject) {
-        const tracks = localVideoRef.current.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
+        stopMediaStream(localVideoRef.current.srcObject);
       }
     };
-  }, []); // Empty dependency - run once on mount
+  }, []); // Run once on mount
 
-  // Setup socket event handlers
+  /**
+   * Setup socket event handlers
+   */
   useEffect(() => {
     if (!socket) return;
 
+    /**
+     * Handles match found event from server
+     */
     const handleMatchFound = async ({ roomId: newRoomId, initiator }) => {
-      roomId.current = newRoomId;
+      roomIdRef.current = newRoomId;
       setIsWaiting(false);
 
       if (initiator) {
-        try {
-          if (!peerConnection.current) {
-            createPeerConnection();
-          }
-
-          // Verify peer connection was created successfully
-          if (!peerConnection.current) {
-            setError('Failed to initialize connection. Please refresh and try again.');
-            return;
-          }
-
-          const offer = await peerConnection.current.createOffer();
-          await peerConnection.current.setLocalDescription(offer);
-          socket.emit('signal', {
-            signal: offer,
-            roomId: newRoomId
-          });
-        } catch (err) {
-          console.error('Error creating offer:', err);
-          setError('Failed to create video connection. Please try again.');
-        }
+        // Create and send offer if we're the initiator
+        await createOffer();
       } else {
-        // Wait for offer, but ensure PC is ready
-        if (!peerConnection.current) {
-          createPeerConnection();
-        }
-      }
-    };
-
-    socket.on('signal', handleSignal);
-    socket.on('match-found', handleMatchFound);
-    socket.on('user-left', handleUserLeft);
-    socket.on('chat-message', handleChatMessage);
-    socket.on('connect_error', (error) => {
-      console.error('Connection error:', error);
-      setError('Failed to connect to server. Please try again later.');
-    });
-
-    return () => {
-      socket.off('signal');
-      socket.off('match-found');
-      socket.off('user-left');
-      socket.off('chat-message');
-      socket.off('connect_error');
-    };
-  }, [socket]); // Only depend on socket
-
-  // removed handleUserConnected as it is now inside match-found logic
-
-  const handleSignal = async (data) => {
-    try {
-      // Ignore signals from ourselves (shouldn't happen with server fix, but defensive)
-      if (data.userId === socket?.id) {
-        console.log('Ignoring own signal');
-        return;
-      }
-
-      if (!peerConnection.current) {
+        // Wait for offer, but ensure peer connection is ready
         createPeerConnection();
       }
-
-      // Check if peer connection is in a valid state
-      if (peerConnection.current.signalingState === 'closed') {
-        console.warn('Peer connection is closed, ignoring signal');
-        return;
-      }
-
-      // Handle ICE candidates
-      if (data.signal.type === 'candidate') {
-        if (peerConnection.current.remoteDescription) {
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
-        }
-        return;
-      }
-
-      // Validate signaling state before setting remote description
-      const currentState = peerConnection.current.signalingState;
-
-      if (data.signal.type === 'offer') {
-        // Can receive offer in 'stable' or 'have-local-offer' state
-        if (currentState !== 'stable' && currentState !== 'have-local-offer') {
-          console.warn(`Cannot process offer in state: ${currentState}`);
-          return;
-        }
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.signal));
-        const answer = await peerConnection.current.createAnswer();
-        await peerConnection.current.setLocalDescription(answer);
-        socket.emit('signal', {
-          signal: answer,
-          roomId: roomId.current
-        });
-      } else if (data.signal.type === 'answer') {
-        // Can only receive answer in 'have-local-offer' state
-        if (currentState !== 'have-local-offer') {
-          console.warn(`Cannot process answer in state: ${currentState}`);
-          return;
-        }
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data.signal));
-      }
-    } catch (err) {
-      console.error('Error handling signal:', err);
-      setError('Failed to establish video connection. Please try again.');
-    }
-  };
-
-  const handleUserLeft = (data) => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
-    setIsConnected(false);
-    setRemoteStream(null);
-
-    // Clear chat messages
-    setMessages([]);
-    setIsChatOpen(false);
-
-    // Show different messages based on reason
-    const { reason } = data || {};
-    if (reason === 'skip') {
-      setError('User skipped you');
-      // Automatically search for new match when skipped
-      setTimeout(() => {
-        setError(null);
-        startChat();
-      }, 1000); // Small delay to show the message
-    } else {
-      setError('The other user has disconnected');
-      // Auto-search on disconnect too
-      setTimeout(() => {
-        setError(null);
-        startChat();
-      }, 1000);
-    }
-  };
-
-  const createPeerConnection = () => {
-    if (!localStreamRef.current) {
-      console.error('Cannot create peer connection: local stream not ready');
-      setError('Please wait for camera to initialize...');
-      return;
-    }
-
-    const configuration = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
-      ]
     };
 
-    peerConnection.current = new RTCPeerConnection(configuration);
-
-    localStreamRef.current.getTracks().forEach(track => {
-      peerConnection.current.addTrack(track, localStreamRef.current);
+    // Register event listeners
+    socket.on(SOCKET_EVENTS.SIGNAL, handleSignal);
+    socket.on(SOCKET_EVENTS.MATCH_FOUND, handleMatchFound);
+    socket.on(SOCKET_EVENTS.USER_LEFT, handleUserLeft);
+    socket.on(SOCKET_EVENTS.CHAT_MESSAGE, handleChatMessage);
+    socket.on(SOCKET_EVENTS.CONNECT_ERROR, (error) => {
+      console.error('Connection error:', error);
+      setError(ERROR_MESSAGES.SERVER_CONNECTION_FAILED);
     });
 
-    peerConnection.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit('signal', {
-          signal: {
-            type: 'candidate',
-            candidate: event.candidate
-          },
-          roomId: roomId.current
-        });
-      }
+    // Cleanup listeners
+    return () => {
+      socket.off(SOCKET_EVENTS.SIGNAL);
+      socket.off(SOCKET_EVENTS.MATCH_FOUND);
+      socket.off(SOCKET_EVENTS.USER_LEFT);
+      socket.off(SOCKET_EVENTS.CHAT_MESSAGE);
+      socket.off(SOCKET_EVENTS.CONNECT_ERROR);
     };
+  }, [socket, handleSignal, handleChatMessage, createOffer, createPeerConnection]);
 
-    peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-        setRemoteStream(event.streams[0]);
-        setIsConnected(true);
-        setIsWaiting(false);
-      }
-    };
+  /**
+   * Handles user left event
+   * @param {Object} data - Event data containing reason for leaving
+   */
+  const handleUserLeft = (data) => {
+    // Close peer connection and clear remote video
+    closePeer();
 
-    peerConnection.current.oniceconnectionstatechange = () => {
-      const state = peerConnection.current.iceConnectionState;
-      console.log('ICE connection state:', state);
+    // Clear chat
+    clearMessages();
+    closeChat();
 
-      // Only handle permanent failures or closures
-      // 'disconnected' can be temporary during connection setup
-      if (state === 'failed' || state === 'closed') {
-        handleUserLeft({ reason: 'disconnected' });
-      }
-    };
+    // Show appropriate message based on reason
+    const { reason } = data || {};
+    if (reason === DISCONNECT_REASONS.SKIP) {
+      setError(ERROR_MESSAGES.USER_SKIPPED);
+    } else {
+      setError(ERROR_MESSAGES.USER_DISCONNECTED);
+    }
+
+    // Automatically search for new match
+    setTimeout(() => {
+      setError(null);
+      startChat();
+    }, TIMING.AUTO_SEARCH_DELAY);
   };
 
+  /**
+   * Starts searching for a chat partner
+   */
   const startChat = () => {
-    console.log('Start chat clicked. Media ready:', isMediaReady, 'Local stream:', !!localStreamRef.current, 'Tracks:', localStreamRef.current?.getTracks().length);
+    console.log('Start chat clicked. Media ready:', isMediaReady);
 
-    if (!localStreamRef.current || !localStreamRef.current.getTracks || localStreamRef.current.getTracks().length === 0) {
-      setError('Please wait for camera to initialize...');
+    // Validate media stream is ready
+    if (!localStreamRef.current || !isStreamValid(localStreamRef.current)) {
+      setError(ERROR_MESSAGES.MEDIA_NOT_READY);
       return;
     }
 
     setIsWaiting(true);
     setError(null);
-    socket.emit('join-room', {
+
+    // Emit join room event
+    socket.emit(SOCKET_EVENTS.JOIN_ROOM, {
       roomId: null,
       interests: interests ? interests.split(',').map(i => i.trim()) : []
     });
   };
 
+  /**
+   * Skips current chat and searches for new partner
+   */
   const skipChat = () => {
-    // Close current peer connection
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
+    // Close current connection
+    closePeer();
 
-    // Clear remote video
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
+    // Notify server we're leaving with skip reason
+    socket.emit(SOCKET_EVENTS.LEAVE_ROOM, {
+      roomId: roomIdRef.current,
+      reason: DISCONNECT_REASONS.SKIP
+    });
 
-    // Notify server we're leaving this room with skip reason
-    socket.emit('leave-room', { roomId: roomId.current, reason: 'skip' });
+    // Clear chat
+    clearMessages();
+    closeChat();
 
-    // Keep camera running and immediately search for new match
-    setIsConnected(false);
-    setRemoteStream(null);
+    // Reset state
     setError(null);
-
-    // Clear chat messages and close chat box
-    setMessages([]);
-    setIsChatOpen(false);
 
     // Automatically start searching for next match
     startChat();
   };
 
+  /**
+   * Toggles camera on/off
+   */
   const toggleCamera = () => {
     if (localStreamRef.current) {
-      const videoTrack = localStreamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsCameraOn(videoTrack.enabled);
+      const newState = toggleTrack(localStreamRef.current, 'video', !isCameraOn);
+      if (newState !== null) {
+        setIsCameraOn(newState);
       }
     }
   };
 
+  /**
+   * Closes error snackbar
+   */
   const handleCloseError = () => {
     setError(null);
   };
-
-  // Chat functions
-  const handleChatMessage = (data) => {
-    const { message, senderId } = data;
-    setMessages(prev => [...prev, {
-      text: message,
-      isOwn: senderId === socket?.id,
-      timestamp: new Date().toISOString()
-    }]);
-
-    // Auto-open chat when receiving a message
-    if (!isChatOpen) {
-      setIsChatOpen(true);
-    }
-  };
-
-  const sendMessage = () => {
-    if (!currentMessage.trim() || !roomId.current) return;
-
-    socket.emit('chat-message', {
-      roomId: roomId.current,
-      message: currentMessage
-    });
-
-    // Add own message to display
-    setMessages(prev => [...prev, {
-      text: currentMessage,
-      isOwn: true,
-      timestamp: new Date().toISOString()
-    }]);
-
-    setCurrentMessage('');
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Click outside to close chat
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (chatPopupRef.current && !chatPopupRef.current.contains(event.target)) {
-        // Check if click is not on the chat button either
-        const chatButton = event.target.closest('button');
-        const isChatButton = chatButton?.querySelector('svg')?.getAttribute('data-testid') === 'ChatIcon';
-
-        if (!isChatButton && isChatOpen) {
-          setIsChatOpen(false);
-        }
-      }
-    };
-
-    if (isChatOpen) {
-      // Add event listener with a small delay to prevent immediate closing
-      setTimeout(() => {
-        document.addEventListener('mousedown', handleClickOutside);
-      }, 100);
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isChatOpen]);
-
-  // Auto-focus input when chat opens
-  useEffect(() => {
-    if (isChatOpen && chatInputRef.current) {
-      chatInputRef.current.focus();
-    }
-  }, [isChatOpen]);
 
   return (
     <Box sx={{
@@ -620,6 +306,7 @@ const VideoChat = () => {
       py: { xs: 2, sm: 3, md: 4 },
       px: { xs: 1, sm: 2, md: 3 }
     }}>
+      {/* Page Title */}
       <Typography
         variant="h4"
         sx={{
@@ -631,7 +318,9 @@ const VideoChat = () => {
         Video Chat
       </Typography>
 
+      {/* Video Container */}
       <VideoContainer>
+        {/* Local Video */}
         <LocalVideoBox>
           <video
             ref={localVideoRef}
@@ -646,11 +335,12 @@ const VideoChat = () => {
               display: isCameraOn ? 'block' : 'none'
             }}
           />
-          <CameraButton onClick={toggleCamera}>
+          <CameraButton onClick={toggleCamera} aria-label="Toggle camera">
             {isCameraOn ? <VideocamIcon /> : <VideocamOffIcon />}
           </CameraButton>
         </LocalVideoBox>
 
+        {/* Remote Video */}
         <RemoteVideoBox>
           <video
             ref={remoteVideoRef}
@@ -750,6 +440,7 @@ const VideoChat = () => {
         </RemoteVideoBox>
       </VideoContainer>
 
+      {/* Controls */}
       <Controls isConnected={isConnected}>
         {!isConnected ? (
           <Button
@@ -767,7 +458,8 @@ const VideoChat = () => {
         ) : (
           <>
             <IconButton
-              onClick={() => setIsChatOpen(!isChatOpen)}
+              onClick={toggleChat}
+              aria-label="Toggle chat"
               sx={{
                 backgroundColor: '#000',
                 color: '#fff',
@@ -797,9 +489,10 @@ const VideoChat = () => {
         )}
       </Controls>
 
+      {/* Error Snackbar */}
       <Snackbar
         open={!!error}
-        autoHideDuration={6000}
+        autoHideDuration={TIMING.ERROR_AUTO_HIDE_DURATION}
         onClose={handleCloseError}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
@@ -822,7 +515,8 @@ const VideoChat = () => {
               Chat
             </Typography>
             <IconButton
-              onClick={() => setIsChatOpen(false)}
+              onClick={closeChat}
+              aria-label="Close chat"
               sx={{
                 color: '#fff',
                 padding: '4px',
@@ -893,6 +587,7 @@ const VideoChat = () => {
             <IconButton
               onClick={sendMessage}
               disabled={!currentMessage.trim()}
+              aria-label="Send message"
               sx={{
                 backgroundColor: '#000',
                 color: '#fff',
@@ -919,4 +614,4 @@ const VideoChat = () => {
   );
 };
 
-export default VideoChat; 
+export default VideoChat;

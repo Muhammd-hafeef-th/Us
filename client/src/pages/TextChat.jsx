@@ -137,12 +137,8 @@ const TextChat = () => {
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (message.trim() && socket && isConnected) {
-      const messageData = {
-        text: message,
-        timestamp: new Date().toLocaleTimeString(),
-      };
       socket.emit('send-message', {
-        ...messageData,
+        message: message,
         roomId: 'text-chat',
       });
       setMessage('');
@@ -204,7 +200,7 @@ const TextChat = () => {
                 ) : (
                   <>
                     <ListItemText
-                      primary={msg.text}
+                      primary={msg.message || msg.text}
                       secondary={`${msg.sender} - ${msg.timestamp}`}
                       sx={{
                         '& .MuiListItemText-primary': {
